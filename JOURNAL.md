@@ -49,3 +49,30 @@ safety layer and asserts every one is blocked. A successful fix gives us
   *not* block. If so, I'll document those as findings rather than silently
   weakening the tests, and decide with the issue whether hardening the defense is
   in scope.
+
+## Week 8 — Reproduction & solution planning
+
+**Reproduction:** Wrote `scripts/repro_issue_71.py` and ran it against
+`safety/prompt_defense.py`. Result: **12 / 12 known injection attacks bypass**
+`is_injection_attempt()`, and `sanitize()` leaves instruction-style attacks fully
+intact. Root cause: the detection patterns are anchored to a leading newline, so
+attacks at the start of the input (or phrased inline) never match, and whole
+categories (jailbreak, prompt-leak, encoding, homoglyphs) have no pattern at all.
+I also found the shipped `tests/unit/test_prompt_defense.py` is tautological and
+already has **1 failing test** (`test_whitespace_variations_detected`).
+
+**Correction from Week 7:** I wrote that the defense had "zero test coverage."
+Reproduction proved that wrong — a unit test file exists, it's just tautological
+and lives in `tests/unit/`, not the red-team suite `tests/security/` that #71
+actually asks for. Good example of a plan being wrong until you run the code.
+
+**Scope decision:** Because the issue requires attacks to actually be *blocked*
+and reproduction shows they aren't, this is tests **plus** hardening the defense —
+not tests-only. Wiring the (currently orphaned) `PromptDefense` into the pipeline
+is out of scope.
+
+**Plan:** Full solution plan in [PLAN.md](PLAN.md) — files to change, ordered
+sub-tasks, and six named risks (false positives are the real difficulty).
+
+**Reproduction commits on this branch:** [x] `scripts/repro_issue_71.py` + output
+documented
