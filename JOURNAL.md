@@ -52,27 +52,52 @@ safety layer and asserts every one is blocked. A successful fix gives us
 
 ## Week 8 — Reproduction & solution planning
 
-**Reproduction:** Wrote `scripts/repro_issue_71.py` and ran it against
-`safety/prompt_defense.py`. Result: **12 / 12 known injection attacks bypass**
-`is_injection_attempt()`, and `sanitize()` leaves instruction-style attacks fully
-intact. Root cause: the detection patterns are anchored to a leading newline, so
-attacks at the start of the input (or phrased inline) never match, and whole
-categories (jailbreak, prompt-leak, encoding, homoglyphs) have no pattern at all.
-I also found the shipped `tests/unit/test_prompt_defense.py` is tautological and
-already has **1 failing test** (`test_whitespace_variations_detected`).
+**Reproduction commit link:** https://github.com/1sherlynn/pathreview/commit/ff6066e9e4ed8ca92237b8ee0f426dc1608a9188
 
-**Correction from Week 7:** I wrote that the defense had "zero test coverage."
-Reproduction proved that wrong — a unit test file exists, it's just tautological
-and lives in `tests/unit/`, not the red-team suite `tests/security/` that #71
-actually asks for. Good example of a plan being wrong until you run the code.
+**Reproduction summary:**
+I wrote `scripts/repro_issue_71.py` to fire known injection payloads at
+`PromptDefense`; **12/12 attacks bypassed `is_injection_attempt()`** (and
+`sanitize()` left the instructions intact) because the detection patterns are
+anchored to a leading newline, so start-of-input and inline attacks never match.
 
-**Scope decision:** Because the issue requires attacks to actually be *blocked*
-and reproduction shows they aren't, this is tests **plus** hardening the defense —
-not tests-only. Wiring the (currently orphaned) `PromptDefense` into the pipeline
-is out of scope.
+**PLAN.md link:** https://github.com/1sherlynn/pathreview/blob/test/71-prompt-injection-red-team/PLAN.md
 
-**Plan:** Full solution plan in [PLAN.md](PLAN.md) — files to change, ordered
-sub-tasks, and six named risks (false positives are the real difficulty).
+**Walkthrough video (recommended):** None
 
-**Reproduction commits on this branch:** [x] `scripts/repro_issue_71.py` + output
-documented
+**Blockers or open questions:**
+
+_Open — false positives._ The real risk isn't missing an attack, it's flagging a
+real applicant. Resumes legitimately say "system", "execute", "override". But
+reproduction made me realise the keyword isn't the signal — sentence shape is.
+"I built a distributed system" describes work; "Ignore all previous instructions"
+gives the model an order and refers to the conversation itself. So I'll match on
+command-verb-plus-meta-word ("ignore … instructions") and direct address ("you
+are now") rather than bare keywords. To keep this honest I'm writing the benign
+examples _first_, deliberately stuffed with the tricky words, and wiring them
+into the suite so any benign match fails CI — that way "how strict" gets answered
+by a test run instead of my gut. I can hit 100% on my versioned attack list
+because it's a fixed set; I can't prove zero false positives on all resume text
+ever, so I'll only claim what the benign examples check.
+
+_Decided — CI runs on every PR, no path filter._ I'd planned to scope the job to
+`safety/` and dug into it instead. Filtering at the workflow level (`on:
+pull_request: paths:`) means the workflow never starts on unrelated PRs, so it
+never reports back to GitHub — a required check then hangs at "waiting for
+status" with no red X to click, and the documented fix is a second dummy workflow
+just to answer. Filtering at the job level (`dorny/paths-filter`) is safe but
+pointless here: my suite is plain pytest with no database, so it finishes in
+under a minute, and the helper job that decides whether to skip costs ~20s of
+that. The deciding argument was correctness, not mechanics — my attack examples
+live in `tests/fixtures/injection_attempts/` and the suite in `tests/security/`,
+neither of which is under `safety/`, so a `safety/`-only filter would skip the
+security tests exactly when I add a new attack. It also goes stale: once
+`PromptDefense` is wired into the pipeline (out of scope here), a change in
+`ingestion/` could break detection and the filter would quietly skip the check
+that caught it. The issue asks for it to run "on every PR that touches
+`safety/`" — running on every PR is a superset. Cost of being wrong either way is
+lopsided: 40 extra seconds vs. a stuck PR or a security check that silently does
+nothing. Revisit only if the suite gets slow, and then at the job level.
+
+_Correction from Week 7:_ I claimed "zero test coverage," but reproduction showed
+a (tautological) unit test file already exists — the red-team suite #71 asks for
+still doesn't.
